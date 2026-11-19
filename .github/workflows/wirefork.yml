@@ -40,6 +40,14 @@ jobs:
             build darwin amd64 wirefork-mac-x64
             build darwin arm64 wirefork-mac-arm64; } 2>&1 | tee out/logs/build.log
           ./out/wirefork-linux-x64 --version | tee out/logs/smoke-linux.log
+      - name: macOS universal binary (llvm-lipo, so publishing doesn't wait for a macOS runner)
+        run: |
+          set -o pipefail
+          LIPO=$(command -v llvm-lipo || ls /usr/bin/llvm-lipo-* 2>/dev/null | sort -V | tail -1)
+          if [ -z "$LIPO" ]; then sudo apt-get install -y llvm >/dev/null; LIPO=$(command -v llvm-lipo || ls /usr/bin/llvm-lipo-* | sort -V | tail -1); fi
+          "$LIPO" -create -output out/wirefork-mac-universal out/wirefork-mac-x64 out/wirefork-mac-arm64
+          chmod +x out/wirefork-mac-universal
+          "$LIPO" -info out/wirefork-mac-universal 2>&1 | tee out/logs/lipo.log
           cp LICENSE out/LICENSE-wireproxy.txt
           cp netstack/LICENSE-wireguard-go out/LICENSE-wireguard-go.txt
           cp vendor/gvisor.dev/gvisor/LICENSE out/LICENSE-gvisor.txt
@@ -83,14 +91,13 @@ jobs:
         with:
           name: build
           path: out
-      - name: Universal binary and start test
+      - name: Start test of the universal binary
         run: |
           set -o pipefail
           mkdir -p mac
-          lipo -create -output mac/wirefork-mac-universal out/wirefork-mac-x64 out/wirefork-mac-arm64
-          chmod +x mac/wirefork-mac-universal
-          lipo -info mac/wirefork-mac-universal | tee mac/smoke-mac.log
-          ./mac/wirefork-mac-universal --version 2>&1 | tee -a mac/smoke-mac.log
+          chmod +x out/wirefork-mac-universal
+          lipo -info out/wirefork-mac-universal | tee mac/smoke-mac.log
+          ./out/wirefork-mac-universal --version 2>&1 | tee -a mac/smoke-mac.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -112,7 +119,7 @@ jobs:
           mkdir -p out/logs
           cp art/build/wirefork-linux-x64 art/build/wirefork-win-x64.exe out/ 2>/dev/null || true
           cp art/build/LICENSE-* art/build/WIREFORK.md out/ 2>/dev/null || true
-          cp art/mac/wirefork-mac-universal out/ 2>/dev/null || true
+          cp art/build/wirefork-mac-universal out/ 2>/dev/null || true
           cp art/build/logs/* art/windows/* art/mac/smoke-mac.log out/logs/ 2>/dev/null || true
           cd out
           {
@@ -122,7 +129,7 @@ jobs:
             echo
             echo "- build (tests, linux, cross-compile): ${{ needs.build.result }}"
             echo "- windows start test: ${{ needs.windows.result }}"
-            echo "- mac universal + start test: ${{ needs.mac.result }}"
+            echo "- mac start test (universal binary is built by the build job): ${{ needs.mac.result }}"
             echo
           } > STATUS.md
           find . -type f ! -name STATUS.md | sort >> STATUS.md
