@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"log"
 	"net"
@@ -29,7 +30,7 @@ var default_config_paths = []string{
 	os.Getenv("HOME") + "/.config/wireproxy.conf",
 }
 
-var version = "1.0.8-dev"
+var version = "1.1.3-wirefork.0.1.0"
 
 func panicIfError(err error) {
 	if err != nil {
@@ -215,6 +216,8 @@ func main() {
 	info := parser.String("i", "info", &argparse.Options{Help: "Specify the address and port for exposing health status"})
 	printVerison := parser.Flag("v", "version", &argparse.Options{Help: "Print version"})
 	configTest := parser.Flag("n", "configtest", &argparse.Options{Help: "Configtest mode. Only check the configuration file for validity."})
+	uploadLimit := parser.String("", "upload-limit", &argparse.Options{Default: "auto", Help: "wirefork: auto (measure, then adjust), auto:MBPS (start there, then adjust), MBPS (fixed) or off"})
+	probeURL := parser.String("", "probe-url", &argparse.Options{Default: wireproxy.DefaultProbeURL, Help: "wirefork: HTTPS URL that accepts a POST upload, used to measure upload speed through the tunnel"})
 
 	err := parser.Parse(args)
 	if err != nil {
@@ -226,6 +229,13 @@ func main() {
 		fmt.Printf("wireproxy, version %s\n", version)
 		return
 	}
+
+	limitConf, err := wireproxy.ParseUploadLimit(*uploadLimit)
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+	limitConf.ProbeURL = *probeURL
 
 	if *config == "" {
 		if path, config_exist := configFilePath(); config_exist {
@@ -277,6 +287,12 @@ func main() {
 		logLevel = device.LogLevelSilent
 	}
 
+	// wirefork: load the system CA certificates for the upload measurement
+	// before the sandbox below blocks reading them.
+	if limitConf.Mode == "auto" && limitConf.Start == 0 {
+		_, _ = x509.SystemCertPool()
+	}
+
 	lock("ready", tlsFilePaths(conf.Routines)...)
 
 	tun, err := wireproxy.StartWireguard(conf, logLevel)
@@ -289,6 +305,7 @@ func main() {
 	}
 
 	tun.StartPingIPs()
+	tun.StartUploadLimit(ctx, limitConf)
 
 	if *info != "" {
 		go func() {

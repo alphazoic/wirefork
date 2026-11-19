@@ -8,9 +8,9 @@ import (
 	"net/netip"
 
 	"github.com/MakeNowJust/heredoc/v2"
+	"github.com/windtf/wireproxy/netstack"
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
-	"golang.zx2c4.com/wireguard/tun/netstack"
 )
 
 // DeviceSetting contains the parameters for setting up a tun interface
