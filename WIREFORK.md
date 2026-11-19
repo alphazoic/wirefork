@@ -30,6 +30,10 @@ No stalls with wirefork in the final runs. The remaining gap is mostly the end o
 
 **Use `ResolveStrategy = ipv4`** (`[Resolve]` section) for MEGA through Proton: new IPv6 connections to MEGA's API sometimes take many seconds to complete.
 
+## Upload limit: when it helps
+
+Without the recovery fixes, a limit near the line's capacity prevented stalls on JP#208 (19–25 s) but not on JP#59. With the fixes it made no clear difference on either server (JP#59 with a fixed 14 MB/s: 26–33 s, without: 27–30 s), and the automatic measurement read far too low on JP#59 (1–2 MB/s; the test uploads barely moved). So it is off by default and kept for a manual setting.
+
 ## Options
 
     --upload-limit off       no limit (default)
