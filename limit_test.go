@@ -4,7 +4,7 @@ import "testing"
 
 func TestParseUploadLimit(t *testing.T) {
 	ok := map[string]UploadLimitConfig{
-		"":        {Mode: "auto"},
+		"":        {Mode: "off"},
 		"auto":    {Mode: "auto"},
 		"AUTO:12": {Mode: "auto", Start: 12e6},
 		"off":     {Mode: "off"},

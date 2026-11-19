@@ -2,10 +2,10 @@ package wireproxy
 
 // wirefork: chooses and adjusts the upload limit (netstack/pacer.go).
 //
+//   --upload-limit off      no limit (default)
 //   --upload-limit auto     measure at start (upload test through the tunnel), then adjust
 //   --upload-limit auto:N   start at N MB/s without measuring, then adjust
 //   --upload-limit N        fixed N MB/s, no adjustment
-//   --upload-limit off      no limit (stock wireproxy behaviour)
 //
 // Adjustment, once per second: a burst loss (resends > max(500, 5% of packets
 // sent); normal background loss on the test line was under ~60 per second,
@@ -52,9 +52,9 @@ func ParseUploadLimit(s string) (UploadLimitConfig, error) {
 		return f * 1e6, nil
 	}
 	switch {
-	case s == "" || s == "auto":
+	case s == "auto":
 		return UploadLimitConfig{Mode: "auto"}, nil
-	case s == "off":
+	case s == "" || s == "off":
 		return UploadLimitConfig{Mode: "off"}, nil
 	case strings.HasPrefix(s, "auto:"):
 		v, err := mbps(strings.TrimPrefix(s, "auto:"))

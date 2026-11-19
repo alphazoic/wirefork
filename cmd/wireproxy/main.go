@@ -216,7 +216,7 @@ func main() {
 	info := parser.String("i", "info", &argparse.Options{Help: "Specify the address and port for exposing health status"})
 	printVerison := parser.Flag("v", "version", &argparse.Options{Help: "Print version"})
 	configTest := parser.Flag("n", "configtest", &argparse.Options{Help: "Configtest mode. Only check the configuration file for validity."})
-	uploadLimit := parser.String("", "upload-limit", &argparse.Options{Default: "auto", Help: "wirefork: auto (measure, then adjust), auto:MBPS (start there, then adjust), MBPS (fixed) or off"})
+	uploadLimit := parser.String("", "upload-limit", &argparse.Options{Default: "off", Help: "wirefork: off (default), auto (measure, then adjust), auto:MBPS (start there, then adjust) or MBPS (fixed)"})
 	probeURL := parser.String("", "probe-url", &argparse.Options{Default: wireproxy.DefaultProbeURL, Help: "wirefork: HTTPS URL that accepts a POST upload, used to measure upload speed through the tunnel"})
 
 	err := parser.Parse(args)

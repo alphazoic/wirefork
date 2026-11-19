@@ -10,21 +10,32 @@ Spacing outgoing packets at about the line's upload capacity prevents the bursts
 
 ## Changes from wireproxy
 
-- `netstack/`: copy of `golang.zx2c4.com/wireguard/tun/netstack` (MIT, `netstack/LICENSE-wireguard-go`) with a packet-rate limit (`pacer.go`) on outgoing packets. Senders wait; nothing is dropped.
-- `limit.go`: chooses and adjusts the limit.
+- **gVisor TCP loss recovery** (`patches/gvisor-tcp-recovery.patch`, applied in the committed `vendor/`; `scripts/vendor.sh` refreshes and re-patches it after a go.mod change). Three changes in `pkg/tcpip/transport/tcp`, each matching what Linux does:
+  1. `SetPipe`: segments RACK marked lost don't count as in flight. Before, the tail of a lost burst stayed counted, pipe stayed above cwnd, and the connection only sent on each RTO (one packet per ~300 ms for a minute or more).
+  2. No new recovery (and no second ssthresh cut) while in RTO recovery. Before, RACK flagged the old segments right after an RTO and recomputed ssthresh from cwnd 1, i.e. 2, so the connection grew one segment per round trip afterwards.
+  3. The duplicate-ACK check no longer overwrites RTO recovery with Disorder, which defeated change 2.
+- **Upload limit** (`netstack/pacer.go`, `limit.go`): optional limit on outgoing packets, off by default. `netstack/` is a copy of `golang.zx2c4.com/wireguard/tun/netstack` (MIT, `netstack/LICENSE-wireguard-go`) with the limit added.
 - `cmd/wireproxy/main.go`: options below; loads system CA certificates before the Linux sandbox when measuring.
 - gVisor updated to 2026-11-19.
 
-## Limits of this fix (tested 2026-11-19)
+## Results (2026-11-19, Proton JP#208 and JP#59 from Cambodia, 200 MB upload with ultra, `ResolveStrategy = ipv4`)
 
-On Proton JP#208 the automatic limit gave 200 MB uploads in 19–25 s (Proton CLI 18–23 s). On JP#59 the same day, uploads still stalled (>140 s in 3 of 5 runs with `auto:14`, 2 of 3 with a fixed 8 MB/s) while the Proton CLI took 20–28 s. There, losses happen even at moderate rates, and gVisor's slow recovery after any larger loss still causes the stall. The limit prevents losses caused by bursts. It doesn't fix the recovery.
+| | JP#208 | JP#59 |
+|---|---|---|
+| Proton CLI (Linux kernel TCP) | 18–21 s | 22–23 s |
+| stock wireproxy | mostly 80–118 s, stalls | mostly >140 s |
+| wirefork (recovery fixes, no limit) | 25–30 s | 24–32 s |
+
+No stalls with wirefork in the final runs. The remaining gap is mostly the end of each upload: a connection that hits an RTO at the end of a recovery finishes a few seconds after the others.
+
+**Use `ResolveStrategy = ipv4`** (`[Resolve]` section) for MEGA through Proton: new IPv6 connections to MEGA's API sometimes take many seconds to complete.
 
 ## Options
 
-    --upload-limit auto      measure at start, then adjust (default)
+    --upload-limit off       no limit (default)
+    --upload-limit auto      measure at start, then adjust
     --upload-limit auto:N    start at N MB/s without measuring, then adjust
     --upload-limit N         fixed N MB/s
-    --upload-limit off       no limit (stock wireproxy)
     --probe-url URL          upload target for the measurement (default https://speed.cloudflare.com/__up)
 
 **Measurement** (auto without N, ≤ 6 s, about 40–60 MB): 6 connections through the tunnel send 2 MB uploads one after another, while the limit rises from 2 MB/s by 25% every 200 ms. It stops raising at a burst of resends, when the limit is 1.5× what arrives, or when the senders stop filling it. The result is the highest rate the server confirmed receiving over 2 s.

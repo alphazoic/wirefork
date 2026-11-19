@@ -1,0 +1,59 @@
+--- a/pkg/tcpip/transport/tcp/snd.go
++++ b/pkg/tcpip/transport/tcp/snd.go
+@@ -1258,7 +1258,13 @@
+ 			// NOTE: here we mark the whole segment as lost. We do not try
+ 			// and test every byte in our write buffer as we maintain our
+ 			// pipe in terms of outstanding packets and not bytes.
+-			if !s.ep.scoreboard.IsRangeLost(sb) {
++			// wirefork (1): a segment RACK has marked lost is not in flight
++			// either (Linux: in_flight = packets_out - sacked_out - lost_out +
++			// retrans_out). Without this, the tail of a lost burst (too few SACKed
++			// segments above it for IsRangeLost) stays counted as outstanding,
++			// pipe stays above cwnd, and the sender only transmits on each RTO.
++			rackLost := s.ep.tcpRecovery&tcpip.TCPRACKLossDetection != 0 && s1.lost
++			if !rackLost && !s.ep.scoreboard.IsRangeLost(sb) {
+ 				pipe++
+ 			}
+ 			// SetPipe():
+@@ -1312,7 +1318,11 @@
+ 		s.FastRecovery.HighRxt = s.SndUna - 1
+ 		// Do run SetPipe() to calculate the outstanding segments.
+ 		s.SetPipe()
+-		s.state = tcpip.Disorder
++		// wirefork (3): keep RTORecovery. Overwriting it with Disorder defeats
++		// check (2) above. Linux enters Disorder only from Open.
++		if s.state != tcpip.RTORecovery {
++			s.state = tcpip.Disorder
++		}
+ 		return false
+ 	}
+ 
+@@ -1799,7 +1809,13 @@
+ 		// After the reorder window is calculated, detect any loss by checking
+ 		// if the time elapsed after the segments are sent is greater than the
+ 		// reorder window.
+-		if numLost := s.rc.detectLoss(rcvdSeg.rcvdTime); numLost > 0 && !s.FastRecovery.Active {
++		// wirefork (2): not while recovering from an RTO. Segments RACK marks
++		// lost then belong to the loss the RTO already responded to (cwnd 1,
++		// ssthresh 0.7x); entering recovery again recomputes ssthresh from
++		// cwnd 1, i.e. 2, and leaves the connection growing by one segment per
++		// RTT. The RTO's go-back-N retransmission resends them. Linux likewise
++		// does not enter Recovery from the Loss state.
++		if numLost := s.rc.detectLoss(rcvdSeg.rcvdTime); numLost > 0 && !s.FastRecovery.Active && s.state != tcpip.RTORecovery {
+ 			// If any segment is marked as lost by
+ 			// RACK, enter recovery and retransmit
+ 			// the lost segments.
+--- a/pkg/tcpip/transport/tcp/rack.go
++++ b/pkg/tcpip/transport/tcp/rack.go
+@@ -474,6 +474,11 @@
+ 		return nil
+ 	}
+ 
++	// wirefork (2): see the matching check in sender.handleRcvdSegment.
++	if rc.snd.state == tcpip.RTORecovery {
++		return nil
++	}
++
+ 	fastRetransmit := false
+ 	if !rc.snd.FastRecovery.Active {
+ 		rc.snd.cc.HandleLossDetected()
