@@ -1075,3 +1075,17 @@ func (net *Net) TCPCounters() TCPCounters {
 	st := net.stack.Stats().TCP
 	return TCPCounters{SegmentsSent: st.SegmentsSent.Value(), Retransmits: st.Retransmits.Value()}
 }
+
+// wirefork: SetTCPSendBuffer fixes the TCP send buffer of connections created
+// after the call (default and maximum, so gVisor doesn't grow it to 4 MB).
+// The send buffer holds unsent and unacknowledged data. Large buffers let a
+// program hand over far more data than the tunnel carries, so a request waits
+// in the buffer long after the program wrote it (2026-11-24: 60 s+ waits for
+// MEGA chunk uploads over a ~5 MB/s route with 96 connections).
+func (net *Net) SetTCPSendBuffer(size int) error {
+	opt := tcpip.TCPSendBufferSizeRangeOption{Min: 4096, Default: size, Max: size}
+	if err := net.stack.SetTransportProtocolOption(tcp.ProtocolNumber, &opt); err != nil {
+		return fmt.Errorf("could not set the TCP send buffer: %v", err)
+	}
+	return nil
+}

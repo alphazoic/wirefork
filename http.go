@@ -165,10 +165,18 @@ func (s *HTTPServer) listen(network, addr string) (net.Listener, error) {
 			return nil, err
 		}
 
-		return tls.Listen(network, addr, &tls.Config{Certificates: []tls.Certificate{cert}})
+		ln, err := net.Listen(network, addr)
+		if err != nil {
+			return nil, err
+		}
+		return tls.NewListener(withLocalBuffer(ln), &tls.Config{Certificates: []tls.Certificate{cert}}), nil
 	}
 
-	return net.Listen(network, addr)
+	ln, err := net.Listen(network, addr)
+	if err != nil {
+		return nil, err
+	}
+	return withLocalBuffer(ln), nil
 }
 
 // ListenAndServe is used to create a listener and serve on it

@@ -228,7 +228,11 @@ func (config *Socks5Config) SpawnRoutine(vt *VirtualTun) {
 
 	server := socks5.NewServer(options...)
 
-	if err := server.ListenAndServe("tcp", config.BindAddress); err != nil {
+	ln, err := net.Listen("tcp", config.BindAddress)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := server.Serve(withLocalBuffer(ln)); err != nil {
 		log.Fatal(err)
 	}
 }

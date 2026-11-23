@@ -17,6 +17,7 @@ Spacing outgoing packets at about the line's upload capacity prevents the bursts
 - **Upload limit** (`netstack/pacer.go`, `limit.go`): optional limit on outgoing packets, off by default. `netstack/` is a copy of `golang.zx2c4.com/wireguard/tun/netstack` (MIT, `netstack/LICENSE-wireguard-go`) with the limit added.
 - `cmd/wireproxy/main.go`: options below; loads system CA certificates before the Linux sandbox when measuring.
 - gVisor updated to 2026-11-19.
+- **Buffer limits** (`--send-buffer`, `--local-buffer`, 0.3.0): TCP send buffer of tunnel connections (`netstack.SetTCPSendBuffer`) and receive buffer of connections accepted on the proxy ports (`buffers.go`). See below.
 
 ## Results (2026-11-19, Proton JP#208 and JP#59 from Cambodia, 200 MB upload with ultra, `ResolveStrategy = ipv4`)
 
@@ -34,6 +35,21 @@ No stalls with wirefork in the final runs. The remaining gap is mostly the end o
 
 Without the recovery fixes, a limit near the line's capacity prevented stalls on JP#208 (19–25 s) but not on JP#59. With the fixes it made no clear difference on either server (JP#59 with a fixed 14 MB/s: 26–33 s, without: 27–30 s), and the automatic measurement read far too low on JP#59 (1–2 MB/s; the test uploads barely moved). So it is off by default and kept for a manual setting.
 
+## Buffer limits (0.3.0)
+
+With default buffers, a program writing to the proxy can hand over far more data than the tunnel carries: the local connection's receive buffer grows to several MB (it's local and fast) and gVisor's send buffer grows to 4 MB, per connection. MEGA's library (ultra) with 96 upload connections handed over ~3x what the Proton CLI path accepted in the first 10 s; on a ~5–7 MB/s route (Cambodia → Proton AD#12 → MEGA Barcelona) chunks then waited 60 s+ before MEGA could answer, files stopped moving and requests timed out. The Linux kernel path (Proton CLI) never did this.
+
+Results 2026-11-24 (M3 small-file mode load: 12 files x 8 connections, 2 GB; files with no progress for 60 s):
+
+| | AD#12 | SG#70 |
+|---|---|---|
+| Proton CLI | 6.85–7.18 MiB/s, 0 | 11.66 MiB/s, 0 |
+| wirefork 0.2.0 (default buffers) | 6.80 MiB/s, **17** (earlier: 22, 25) | 11.39 MiB/s, 0 |
+| send 256 KB + local 256 KB | 6.13–6.66 MiB/s, 0 | |
+| send 64 KB + local 64 KB | 6.15–6.17 MiB/s, 0 | 11.40 MiB/s, 0 |
+
+The send buffer also caps what one connection can have in flight (about buffer / round trip): one connection to Cloudflare through SG#70 reached ~4.8 MB/s with 256 KB vs 11–13 MB/s with 1 MB. A 200 MB upload with ultra (8 connections) was unaffected: SG#70 18.9/18.1 s (0.2.0: 19.2/17.6 s), AD#12 106/82 s (0.2.0: 89/109 s). Default 256 KB for both. Programs that upload over one connection on a long route may want more.
+
 ## Options
 
     --upload-limit off       no limit (default)
@@ -41,6 +57,9 @@ Without the recovery fixes, a limit near the line's capacity prevented stalls on
     --upload-limit auto:N    start at N MB/s without measuring, then adjust
     --upload-limit N         fixed N MB/s
     --probe-url URL          upload target for the measurement (default https://speed.cloudflare.com/__up)
+    --send-buffer KB         TCP send buffer per tunnel connection (default 256; 0: gVisor's, 1 MB growing to 4 MB)
+    --local-buffer KB        receive buffer per connection accepted on the proxy ports (default 256; 0: system default).
+                             The size applied: on Linux, which doubles the requested value, wirefork requests half.
 
 **Measurement** (auto without N, ≤ 6 s, about 40–60 MB): 6 connections through the tunnel send 2 MB uploads one after another, while the limit rises from 2 MB/s by 25% every 200 ms. It stops raising at a burst of resends, when the limit is 1.5× what arrives, or when the senders stop filling it. The result is the highest rate the server confirmed receiving over 2 s.
 
@@ -52,3 +71,5 @@ Without the recovery fixes, a limit near the line's capacity prevented stalls on
     wirefork: upload limit 12.6 MB/s (measured 12.6 MB/s)
     wirefork: upload limit 15.7 MB/s (burst loss: 2952 resends)
     wirefork: upload limit 14.2 MB/s (raised)
+    wirefork: TCP send buffer 256 KB
+    wirefork: local proxy receive buffer 131072 bytes requested, 262144 applied

@@ -30,7 +30,7 @@ var default_config_paths = []string{
 	os.Getenv("HOME") + "/.config/wireproxy.conf",
 }
 
-var version = "1.1.3-wirefork.0.2.0"
+var version = "1.1.3-wirefork.0.3.0"
 
 func panicIfError(err error) {
 	if err != nil {
@@ -217,6 +217,8 @@ func main() {
 	printVerison := parser.Flag("v", "version", &argparse.Options{Help: "Print version"})
 	configTest := parser.Flag("n", "configtest", &argparse.Options{Help: "Configtest mode. Only check the configuration file for validity."})
 	uploadLimit := parser.String("", "upload-limit", &argparse.Options{Default: "off", Help: "wirefork: off (default), auto (measure, then adjust), auto:MBPS (start there, then adjust) or MBPS (fixed)"})
+	sendBufferKB := parser.Int("", "send-buffer", &argparse.Options{Default: 256, Help: "wirefork: TCP send buffer per tunnel connection in KB (0: gVisor default, 1 MB growing to 4 MB)"})
+	localBufferKB := parser.Int("", "local-buffer", &argparse.Options{Default: 256, Help: "wirefork: receive buffer per connection accepted on the proxy ports in KB (0: system default)"})
 	probeURL := parser.String("", "probe-url", &argparse.Options{Default: wireproxy.DefaultProbeURL, Help: "wirefork: HTTPS URL that accepts a POST upload, used to measure upload speed through the tunnel"})
 
 	err := parser.Parse(args)
@@ -299,6 +301,15 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	// wirefork: buffer limits, before the proxies accept or open connections.
+	if *sendBufferKB > 0 {
+		if err := tun.Tnet.SetTCPSendBuffer(*sendBufferKB * 1024); err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("wirefork: TCP send buffer %d KB", *sendBufferKB)
+	}
+	wireproxy.LocalBufferSize = *localBufferKB * 1024
 
 	for _, spawner := range conf.Routines {
 		go spawner.SpawnRoutine(tun)
